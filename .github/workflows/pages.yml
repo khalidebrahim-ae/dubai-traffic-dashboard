@@ -1,0 +1,63 @@
+# Pages deployment via GitHub Actions (v3, 2026-07-03). Facts learned the hard way:
+# - deploy-pages CLAMPS timeout to a 600000 ms (10 min) MAXIMUM — do not believe a larger value.
+# - error_count/reporting_interval only govern STATUS-POLLING after a deployment is created;
+#   create-phase throttling ("Deployment failed, try again later." within seconds) is immune
+#   to them. The only defense is SPACED retries — an immediate retry lands in the same
+#   throttle window and fails identically (observed 10s apart).
+name: deploy-pages
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "."
+      - name: Deploy to GitHub Pages
+        id: d1
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+        with:
+          timeout: 600000
+          error_count: 60
+          reporting_interval: 10000
+      - name: Wait out throttle window
+        if: steps.d1.outcome == 'failure'
+        run: sleep 120
+      - name: Retry deploy
+        id: d2
+        if: steps.d1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+        with:
+          timeout: 600000
+          error_count: 60
+          reporting_interval: 10000
+      - name: Wait longer before final retry
+        if: steps.d2.outcome == 'failure'
+        run: sleep 300
+      - name: Final retry
+        if: steps.d2.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        with:
+          timeout: 600000
+          error_count: 60
+          reporting_interval: 10000
