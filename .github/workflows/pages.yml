@@ -1,0 +1,47 @@
+# Custom Pages deployment (2026-07-02, hardened 2026-07-03). Replaces GitHub's internal
+# branch-Pages workflow (hard 10-min queue abort). Hardened after intermittent
+# "Deployment failed, try again later." bursts (Pages API errors, likely soft
+# rate-limiting of a new account): patient polling (10s x 60 errors ~= 10 min of
+# API errors tolerated), plus a full second deploy attempt in the same run.
+name: deploy-pages
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "."
+      - name: Deploy to GitHub Pages
+        id: deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+        with:
+          timeout: 1800000
+          error_count: 60
+          reporting_interval: 10000
+      - name: Retry deploy (rides out Pages API error bursts)
+        if: steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        with:
+          timeout: 1800000
+          error_count: 60
+          reporting_interval: 10000
